@@ -11,9 +11,9 @@
 int decode_udp(struct frame *frame, const int depth, const void *data, const uint32_t len, void *private)
 {
 	const struct udphdr *hdr = data;
-	int ret = -1;
-	uint32_t s;
-
+	uint32_t app_data_size;
+	uint8_t *app_data;
+	(void)depth;
 	(void)private;
 
 	if (len < sizeof hdr[0]) {
@@ -21,28 +21,36 @@ int decode_udp(struct frame *frame, const int depth, const void *data, const uin
 		goto err;
 	}
 
-	s = htons(hdr->len);
-	if (s > len) {
-		fprintf(stderr, "Invalid UDP length : %d (%d at least)\n", s, len);
+	app_data_size = htons(hdr->len);
+	if (app_data_size > len) {
+		fprintf(stderr, "Invalid UDP length : %d (%d at least)\n", app_data_size, len);
 		goto err;
 	}
-	s -= sizeof hdr[0];
+
+	if (app_data_size < sizeof hdr[0]) {
+		fprintf(stderr, "Unexpected UDP pload size : %d (at least %zd expected)\n", app_data_size, sizeof hdr[0]);
+		goto err;
+	}
+
+	app_data_size -= sizeof hdr[0];
+
+	if (app_data_size == 0)
+		app_data = NULL;
+	else {
+		app_data = malloc(app_data_size);
+		if (app_data == NULL) {
+			fprintf(stderr, "Failed to allocate UDP data : %s\n", strerror(errno));
+			goto err;
+		}
+		memcpy(app_data, data + sizeof hdr[0], app_data_size);
+	}
 
 	frame->proto.type = frame_proto_type_udp;
 	frame->proto.udp.hdr = *hdr;
-	frame->proto.udp.data_size = s;
-	frame->proto.udp.data = malloc(s);
-	if (frame->proto.udp.data == NULL) {
-		fprintf(stderr, "Failed to malloc UDP data : %s\n", strerror(errno));
-		goto err;
-	}
-	memcpy(frame->proto.udp.data, data + sizeof hdr[0], s);
+	frame->app.size = app_data_size;
+	frame->app.data = app_data;
+	return 0;
 
-	printf("%*sUDP %d -> %d\n", depth, "", htons(hdr->source), htons(hdr->dest));
-	printf("%*sData (%db)\n", depth, "", s);
-	rawprint(stdout, depth + 1, data + sizeof hdr[0], s, 8, 4);
-
-	ret = 0;
 err:
-	return ret;
+	return -1;
 }

@@ -12,6 +12,7 @@ int main(int ac, char **av)
 	char errbuff[PCAP_ERRBUF_SIZE];
 	char *from;
 	decode_fun_t decode;
+	int ret;
 
 	if (ac >= 2) {
 		from = av[1];
@@ -57,13 +58,16 @@ int main(int ac, char **av)
 			continue;
 		}
 
-		decode(&frame, 0, data, hdr->len, NULL);
+		frame_init(&frame);
+		if (decode(&frame, 0, data, hdr->len, NULL) >= 0)
+			frame_print(stdout, 0, &frame);
+		frame_deinit(&frame);
 	}
 
-	return 0;
+	ret = 0;
 
 close_err:
 	pcap_close(pc);
 err:
-	return 1;
+	return ret;
 }

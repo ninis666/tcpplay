@@ -27,7 +27,7 @@ struct frame_net_arp {
 };
 
 enum frame_net_type {
-	frame_net_type_arp,
+	frame_net_type_arp = 1,
 	frame_net_type_ip,
 };
 
@@ -41,22 +41,16 @@ struct frame_net {
 
 struct frame_proto_udp {
 	struct udphdr hdr;
-	uint32_t data_size;
-	uint8_t *data;
 };
 
 struct frame_proto_tcp {
 	struct tcphdr hdr;
-
 	uint16_t opt_size;
 	uint8_t *opt;
-
-	uint32_t app_data_size;
-	uint8_t *app_data;
 };
 
 enum frame_proto_type {
-	frame_proto_type_udp,
+	frame_proto_type_udp = 1,
 	frame_proto_type_tcp,
 };
 
@@ -68,14 +62,25 @@ struct frame_proto {
 	};
 };
 
+struct frame_app {
+	uint8_t *data;
+	uint32_t size;
+};
+
 struct frame {
 	struct frame_hw hw;
 	struct frame_net net;
 	struct frame_proto proto;
+	struct frame_app app;
 };
 
 int frame_print_hw(FILE *file, const int depth, const struct frame_hw *hw);
 int frame_print_net(FILE *file, const int depth, const struct frame_net *net);
 int frame_print_proto(FILE *file, const int depth, const struct frame_proto *proto);
+int frame_print_app(FILE *file, const int depth, const struct frame_app *app);
+int frame_print(FILE *file, const int depth, const struct frame *frame);
+
+int frame_init(struct frame *frame);
+void frame_deinit(struct frame *frame);
 
 #endif

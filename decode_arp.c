@@ -12,6 +12,7 @@ int decode_arp(struct frame *frame, const int depth, const void *data, const uin
 	const struct ether_arp *hdr = data;
 	int ret = -1;
 	(void)private;
+	(void)depth;
 
 	if (len < sizeof hdr[0]) {
 		fprintf(stderr, "Invalid ARP pload size : %d (%zd at least)\n", len, sizeof hdr[0]);
@@ -62,9 +63,6 @@ int decode_arp(struct frame *frame, const int depth, const void *data, const uin
 	memcpy(frame->net.arp.hw_dest, hdr->arp_tha, sizeof frame->net.arp.hw_dest);
 	memcpy(&frame->net.arp.ip_source, hdr->arp_spa, sizeof frame->net.arp.ip_source);
 	memcpy(&frame->net.arp.ip_dest, hdr->arp_tpa, sizeof frame->net.arp.ip_dest);
-
-	frame_print_net(stdout, depth, &frame->net);
-
 	ret = 0;
 err:
 	return ret;

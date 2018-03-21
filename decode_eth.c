@@ -32,8 +32,6 @@ int decode_eth(struct frame *frame, const int depth, const void *data, const uin
 	memcpy(frame->hw.dest, hdr->ether_dhost, sizeof hdr->ether_dhost);
 	memcpy(frame->hw.source, hdr->ether_shost, sizeof hdr->ether_shost);
 
-	frame_print_hw(stdout, depth, &frame->hw);
-
 	switch (htons(hdr->ether_type)) {
 	default:
 		fprintf(stderr, "!!! Unexpected ETHERNET type : %#06x\n", htons(hdr->ether_type));

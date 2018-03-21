@@ -64,52 +64,8 @@ int decode_tcp(struct frame *frame, const int depth, const void *data, const uin
 	frame->proto.tcp.hdr = *hdr;
 	frame->proto.tcp.opt_size = opt_size;
 	frame->proto.tcp.opt = opt;
-	frame->proto.tcp.app_data_size = app_data_size;
-	frame->proto.tcp.app_data = app_data;
-
-#if 0
-	printf("%*sTCP %d -> %d\n", depth, "", htons(hdr->source), htons(hdr->dest));
-	printf("%*sseq = %d\n", depth + 1, "", htons(hdr->seq));
-	printf("%*sack_seq = %d\n", depth + 1, "", htons(hdr->ack_seq));
-	printf("%*shdr_len = %d (%db)\n", depth + 1, "", hdr->doff, hdr->doff * 4);
-	printf("%*sflags = [ %s%s%s%s%s%s]\n", depth + 1, "", hdr->urg ? "URG " : "", hdr->syn ? "SYN " : "", hdr->ack ? "ACK " : "", hdr->psh ? "PSH " : "", hdr->rst ? "RST " : "", hdr->fin ? "FIN " : "");
-	printf("%*swindow = %d\n", depth + 1, "", hdr->window);
-
-	for (uint16_t idx = 0 ; idx < opt_size ; ) {
-		uint8_t opt_val_len;
-
-		switch (opt[idx]) {
-		case 0:
-			/* End */
-			idx = opt_size;
-			break;
-
-		case 1:
-			/* NOP */
-			idx ++;
-			break;
-
-		default:
-			opt_val_len = opt[idx + 1];
-			if (opt_val_len == 0) {
-				fprintf(stderr, "Invalid TCP option len");
-				break;
-			}
-
-			printf("%*sOPCODE  = %#02x (%db)\n", depth + 1, "", opt[idx], opt_val_len);
-			rawprint(stdout, depth + 2, opt + idx, opt_val_len, 4, 1);
-			idx += opt_val_len;
-			break;
-		}
-	}
-
-	if (app_data_size > 0) {
-		printf("%*sData (%d):\n", depth + 1, "", app_data_size);
-		rawprint(stdout, depth + 1, app_data, app_data_size, 8, 4);
-	}
-#endif
-
-	
+	frame->app.size = app_data_size;
+	frame->app.data = app_data;
 
 	return 0;
 

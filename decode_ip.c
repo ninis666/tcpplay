@@ -38,8 +38,6 @@ int decode_ip(struct frame *frame, const int depth, const void *data, const uint
 	frame->net.ip.source = (struct in_addr){.s_addr = iphdr->saddr};
 	frame->net.ip.dest = (struct in_addr){.s_addr = iphdr->daddr};
 
-	frame_print_net(stdout, depth, &frame->net);
-
 	switch (iphdr->protocol) {
 	default:
 		fprintf(stderr, "Unexpected IP protocol : %d\n", iphdr->protocol);
@@ -53,8 +51,6 @@ int decode_ip(struct frame *frame, const int depth, const void *data, const uint
 		ret = decode_udp(frame, depth + 1, data + iphdr->ihl * 4, len - iphdr->ihl * 4, private);
 		break;
 	}
-
-	frame_print_proto(stdout, depth + 1, &frame->proto);
 
 err:
 	return ret;

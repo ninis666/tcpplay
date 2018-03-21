@@ -1,5 +1,6 @@
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "frame.h"
 #include "rawprint.h"
@@ -51,10 +52,11 @@ static int print_net_arp(FILE *file, const int depth, const struct frame_net_arp
 
 int frame_print_net(FILE *file, const int depth, const struct frame_net *net)
 {
+	int done = 0;
+
 	switch (net->type) {
 	default:
-		abort();
-		break;
+		return fprintf(file, "%*sNo net layer\n", depth, "");
 
 	case frame_net_type_arp:
 		return print_net_arp(file, depth, &net->arp);
@@ -63,16 +65,23 @@ int frame_print_net(FILE *file, const int depth, const struct frame_net *net)
 		return print_net_ip(file, depth, &net->ip);
 	}
 
+	return done;
+
+}
+
+int frame_print_app(FILE *file, const int depth, const struct frame_app *app)
+{
+	int done = 0;
+	done += fprintf(file, "%*sData (%db)\n", depth, "", app->size);
+	if (app->size > 0)
+		done += rawprint(file, depth + 1, app->data, app->size, 8, 4);
+	return done;
 }
 
 static int print_proto_udp(FILE *file, const int depth, const struct frame_proto_udp *udp)
 {
 	int done = 0;
-
 	done += fprintf(file, "%*sUDP %d -> %d\n", depth, "", htons(udp->hdr.source), htons(udp->hdr.dest));
-	done += fprintf(file, "%*sData (%db)\n", depth, "", udp->data_size);
-	done += rawprint(file, depth + 1, udp->data, udp->data_size, 8, 4);
-
 	return done;
 }
 
@@ -116,11 +125,6 @@ static int print_proto_tcp(FILE *file, const int depth, const struct frame_proto
 		}
 	}
 
-	if (tcp->app_data_size > 0) {
-		done += fprintf(file, "%*sData (%d):\n", depth + 1, "", tcp->app_data_size);
-		done += rawprint(stdout, depth + 1, tcp->app_data, tcp->app_data_size, 8, 4);
-	}
-
 	return done;
 }
 
@@ -128,8 +132,7 @@ int frame_print_proto(FILE *file, const int depth, const struct frame_proto *pro
 {
 	switch (proto->type) {
 	default:
-		abort();
-		break;
+		return fprintf(file, "%*sNo proto layer\n", depth, "");
 
 	case frame_proto_type_udp:
 		return print_proto_udp(file, depth, &proto->udp);
@@ -139,3 +142,28 @@ int frame_print_proto(FILE *file, const int depth, const struct frame_proto *pro
 	}
 }
 
+int frame_print(FILE *file, const int depth, const struct frame *frame)
+{
+	int done = 0;
+
+	done += frame_print_hw(file, depth, &frame->hw);
+	done += frame_print_net(file, depth + 1, &frame->net);
+	done += frame_print_proto(file, depth + 2, &frame->proto);
+	done += frame_print_app(file, depth + 3, &frame->app);
+
+	return done;
+}
+
+int frame_init(struct frame *frame)
+{
+	memset(frame, 0, sizeof frame[0]);
+	return 0;
+}
+
+void frame_deinit(struct frame *frame)
+{
+	if (frame->proto.type == frame_proto_type_tcp)
+		free(frame->proto.tcp.opt);
+	free(frame->app.data);
+	frame_init(frame);
+}
