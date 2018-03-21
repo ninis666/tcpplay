@@ -5,7 +5,7 @@ CFLAGS = -g -Wall -Wextra -Werror
 
 all : $(DEP_FILE) $(EXE)
 
-tcpplay: tcpplay.o decode_eth.o decode_sll.o decode.o decode_arp.o decode_ip.o decode_tcp.o decode_udp.o rawprint.o frame.o
+tcpplay: tcpplay.o decode_eth.o decode_sll.o decode.o decode_arp.o decode_ip.o decode_tcp.o decode_udp.o rawprint.o frame.o frame_list.o
 	$(CC) $(LDFLAGS) $^ -lpcap -o $@
 
 tcp_server: tcp_server.o

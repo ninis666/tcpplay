@@ -7,6 +7,7 @@
 # include <netinet/tcp.h>
 # include <arpa/inet.h>
 # include <stdio.h>
+# include <sys/time.h>
 
 struct frame_hw {
 	uint8_t  source[ETH_ALEN]; /* source ether addr	*/
@@ -72,6 +73,7 @@ struct frame {
 	struct frame_net net;
 	struct frame_proto proto;
 	struct frame_app app;
+	struct timeval ts;
 };
 
 int frame_print_hw(FILE *file, const int depth, const struct frame_hw *hw);
@@ -80,7 +82,7 @@ int frame_print_proto(FILE *file, const int depth, const struct frame_proto *pro
 int frame_print_app(FILE *file, const int depth, const struct frame_app *app);
 int frame_print(FILE *file, const int depth, const struct frame *frame);
 
-int frame_init(struct frame *frame);
+int frame_init(struct frame *frame, const struct timeval *ts);
 void frame_deinit(struct frame *frame);
 
 #endif

@@ -146,17 +146,20 @@ int frame_print(FILE *file, const int depth, const struct frame *frame)
 {
 	int done = 0;
 
-	done += frame_print_hw(file, depth, &frame->hw);
-	done += frame_print_net(file, depth + 1, &frame->net);
-	done += frame_print_proto(file, depth + 2, &frame->proto);
-	done += frame_print_app(file, depth + 3, &frame->app);
+	done += fprintf(file, "%*s[%lds, %ldus]\n", depth, "", frame->ts.tv_sec, frame->ts.tv_usec);
+	done += frame_print_hw(file, depth + 1, &frame->hw);
+	done += frame_print_net(file, depth + 2, &frame->net);
+	done += frame_print_proto(file, depth + 3, &frame->proto);
+	done += frame_print_app(file, depth + 4, &frame->app);
 
 	return done;
 }
 
-int frame_init(struct frame *frame)
+int frame_init(struct frame *frame, const struct timeval *ts)
 {
 	memset(frame, 0, sizeof frame[0]);
+	if (ts != NULL)
+		frame->ts = *ts;
 	return 0;
 }
 
@@ -165,5 +168,5 @@ void frame_deinit(struct frame *frame)
 	if (frame->proto.type == frame_proto_type_tcp)
 		free(frame->proto.tcp.opt);
 	free(frame->app.data);
-	frame_init(frame);
+	frame_init(frame, NULL);
 }

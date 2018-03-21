@@ -5,6 +5,7 @@
 
 #include "decode.h"
 #include "rawprint.h"
+#include "frame_list.h"
 
 int main(int ac, char **av)
 {
@@ -12,6 +13,7 @@ int main(int ac, char **av)
 	char errbuff[PCAP_ERRBUF_SIZE];
 	char *from;
 	decode_fun_t decode;
+	struct frame_table frame_table;
 	int ret;
 
 	if (ac >= 2) {
@@ -31,10 +33,13 @@ int main(int ac, char **av)
 	if (decode == NULL)
 		goto close_err;
 
+	if (frame_table_init(&frame_table) < 0)
+		goto close_err;
+
 	for (;;) {
 		struct pcap_pkthdr *hdr;
 		const u_char *data;
-		struct frame frame;
+		struct frame_node *frame_node;
 		int res;
 
 		res = pcap_next_ex(pc, &hdr, &data);
@@ -45,7 +50,7 @@ int main(int ac, char **av)
 
 		if (res == -1) {
 			fprintf(stderr, "Failed to read from <%s> : %s", from, pcap_geterr(pc));
-			goto close_err;
+			goto free_table_err;
 		}
 
 		if (res != 1)
@@ -58,14 +63,21 @@ int main(int ac, char **av)
 			continue;
 		}
 
-		frame_init(&frame);
-		if (decode(&frame, 0, data, hdr->len, NULL) >= 0)
-			frame_print(stdout, 0, &frame);
-		frame_deinit(&frame);
+		frame_node = frame_node_new(&frame_table, &hdr->ts);
+		if (frame_node == NULL)
+			goto free_table_err;
+
+		if (decode(&frame_node->frame, 0, data, hdr->len, NULL) >= 0)
+			frame_print(stdout, 0, &frame_node->frame);
+
+		if ((random() % 2) == 0)
+			frame_node_free(&frame_table, frame_node);
 	}
 
 	ret = 0;
 
+free_table_err:
+	frame_table_free(&frame_table);
 close_err:
 	pcap_close(pc);
 err:
