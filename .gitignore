@@ -1,0 +1,7 @@
+
+*.o
+.*.depend
+*.pcap
+core.*
+core
+vgcore.*
