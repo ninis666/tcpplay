@@ -100,7 +100,7 @@ static void list_free(struct frame_list *list)
 		abort();
 }
 
-void frame_node_free(struct frame_table *table, struct frame_node *node)
+void frame_node_recycle(struct frame_table *table, struct frame_node *node)
 {
 	/*
 	 * Move this node from used_list to free_list

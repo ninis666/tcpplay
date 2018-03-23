@@ -75,7 +75,6 @@ int decode_sll(struct frame *frame, const int depth, const void *data, const uin
 
 	switch (htons(hdr->sll_protocol)) {
 	default:
-		fprintf(stderr, "!!! Unexpected sll_protocol : %#06x\n", htons(hdr->sll_protocol));
 		goto err;
 
 	case ETHERTYPE_IP:

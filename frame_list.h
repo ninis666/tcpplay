@@ -24,6 +24,6 @@ struct frame_table {
 int frame_table_init(struct frame_table *table);
 void frame_table_free(struct frame_table *table);
 struct frame_node *frame_node_new(struct frame_table *table, const struct timeval *ts);
-void frame_node_free(struct frame_table *table, struct frame_node *node);
+void frame_node_recycle(struct frame_table *table, struct frame_node *node);
 
 #endif
