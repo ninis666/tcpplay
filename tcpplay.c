@@ -73,13 +73,15 @@ int main(int ac, char **av)
 		if (decode(&frame_node->frame, 0, data, hdr->len, NULL) >= 0) {
 			int res;
 
-			res = session_process_frame(&session_table, &frame_node->frame);
+			res = session_process_frame(&session_table, &frame_table.used_list, frame_node);
 			if (res < 0)
 				goto free_session_table_err;
 			if (res == 0)
 				frame_node_recycle(&frame_table, frame_node);
 		}
 	}
+
+	session_table_dump(stdout, 0, &session_table);
 
 	ret = 0;
 

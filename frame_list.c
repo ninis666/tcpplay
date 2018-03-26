@@ -9,9 +9,9 @@ enum {
 	pool_inc = 16,
 };
 
-int frame_table_init(struct frame_table *table)
+int frame_list_init(struct frame_list *list)
 {
-	memset(table, 0, sizeof table[0]);
+	memset(list, 0, sizeof list[0]);
 	return 0;
 }
 
@@ -60,7 +60,7 @@ static void list_link_after(struct frame_list *list, struct frame_node *after, s
 		abort();
 }
 
-static void list_unlink(struct frame_list *list, struct frame_node *node)
+void frame_list_unlink(struct frame_list *list, struct frame_node *node)
 {
 	if (list->count == 0)
 		abort();
@@ -79,7 +79,22 @@ static void list_unlink(struct frame_list *list, struct frame_node *node)
 	list->count --;
 }
 
-static void list_free(struct frame_list *list)
+void frame_list_link_ordered(struct frame_list *list, struct frame_node *node)
+{
+	struct frame_node *node_after;
+
+	for (node_after = list->last ; node_after != NULL ; node_after = node_after->prev) {
+		if (timercmp(&node->frame.ts, &node_after->frame.ts, >))
+			break;
+	}
+
+	if (node_after != NULL)
+		list_link_after(list, node_after, node);
+	else
+		list_link_first(list, node);
+}
+
+void frame_list_free(struct frame_list *list)
 {
 	struct frame_node *node;
 
@@ -100,12 +115,29 @@ static void list_free(struct frame_list *list)
 		abort();
 }
 
+int frame_table_init(struct frame_table *table)
+{
+	memset(table, 0, sizeof table[0]);
+
+	if (frame_list_init(&table->free_list) < 0)
+		goto err;
+
+	if (frame_list_init(&table->used_list) < 0)
+		goto free_free_list_err;
+	return 0;
+
+free_free_list_err:
+	frame_list_free(&table->free_list);
+err:
+	return -1;
+}
+
 void frame_node_recycle(struct frame_table *table, struct frame_node *node)
 {
 	/*
 	 * Move this node from used_list to free_list
 	 */
-	list_unlink(&table->used_list, node);
+	frame_list_unlink(&table->used_list, node);
 	list_link_last(&table->free_list, node);
 	frame_deinit(&node->frame);
 }
@@ -113,15 +145,14 @@ void frame_node_recycle(struct frame_table *table, struct frame_node *node)
 void frame_table_free(struct frame_table *table)
 {
 
-	list_free(&table->used_list);
-	list_free(&table->free_list);
+	frame_list_free(&table->used_list);
+	frame_list_free(&table->free_list);
 	memset(table, 0, sizeof table[0]);
 }
 
 struct frame_node *frame_node_new(struct frame_table *table, const struct timeval *ts)
 {
 	struct frame_node *node;
-	struct frame_node *node_after;
 
 	if (table->free_list.first == NULL) {
 
@@ -147,17 +178,8 @@ struct frame_node *frame_node_new(struct frame_table *table, const struct timeva
 		abort();
 	if (frame_init(&node->frame, ts) < 0)
 		goto err;
-	list_unlink(&table->free_list, node);
-
-	for (node_after = table->used_list.last ; node_after != NULL ; node_after = node_after->prev) {
-		if (timercmp(ts, &node_after->frame.ts, >))
-			break;
-	}
-
-	if (node_after != NULL)
-		list_link_after(&table->used_list, node_after, node);
-	else
-		list_link_first(&table->used_list, node);
+	frame_list_unlink(&table->free_list, node);
+	frame_list_link_ordered(&table->used_list, node);
 	return node;
 
 err:

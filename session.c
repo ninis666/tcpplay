@@ -98,6 +98,7 @@ static struct session_entry *session_table_extend(struct session_pool **pool_ptr
 {
 	struct session_pool *pool = *pool_ptr;
 	struct session_entry *entry = NULL;
+	struct session_pool *new_pool = NULL;
 
 	if (pool == NULL) {
 		pool = calloc(1, sizeof pool[0]);
@@ -106,6 +107,7 @@ static struct session_entry *session_table_extend(struct session_pool **pool_ptr
 			goto err;
 		}
 		*pool_ptr = pool;
+		new_pool = pool;
 	}
 
 	entry = calloc(1, sizeof entry[0]);
@@ -113,17 +115,27 @@ static struct session_entry *session_table_extend(struct session_pool **pool_ptr
 		fprintf(stderr, "Failed to create pool entry : %s\n", strerror(errno));
 		goto err;
 	}
+	if (frame_list_init(&entry->frame_list) < 0)
+		goto free_entry_err;
 	entry->key = *key;
 
 	entry->prev = pool->session_hash_table[hash].last;
 	pool->session_hash_table[hash].last = entry;
-
-err:
+	if (new_pool != NULL)
+		*pool_ptr = new_pool;
 	return entry;
+
+free_entry_err:
+	free(entry);
+err:
+	if (new_pool != NULL)
+		free(new_pool);
+	return NULL;
 }
 
-static int process_udp(struct session_table *table, struct frame *frame)
+static int process_udp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
 {
+	struct frame *frame = &frame_node->frame;
 	struct session_entry *entry;
 	struct session_key key;
 	size_t hash;
@@ -137,19 +149,19 @@ static int process_udp(struct session_table *table, struct frame *frame)
 		entry = session_table_extend(&table->udp, hash, &key);
 		if (entry == NULL)
 			goto err;
-		printf("%d %d added !\n", htons(frame->proto.udp.hdr.source), htons(frame->proto.udp.hdr.dest));
-	} else
-		printf("%d %d found back !\n", htons(frame->proto.udp.hdr.source), htons(frame->proto.udp.hdr.dest));
+	}
 
+	frame_list_unlink(frame_list, frame_node);
+	frame_list_link_ordered(&entry->frame_list, frame_node);
 	ret = 1;
 err:
 	return ret;
 }
 
-
-int session_process_frame(struct session_table *table, struct frame *frame)
+int session_process_frame(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
 {
 	int ret = 0;
+	struct frame *frame = &frame_node->frame;
 
 	if (frame->net.type != frame_net_type_ip)
 		goto drop_frame;
@@ -159,7 +171,7 @@ int session_process_frame(struct session_table *table, struct frame *frame)
 		goto drop_frame;
 
 	case frame_proto_type_udp:
-		ret = process_udp(table, frame);
+		ret = process_udp(table, frame_list, frame_node);
 		break;
 	}
 
@@ -175,6 +187,7 @@ static void session_entry_list_free(struct session_entry *last)
 	ptr = last;
 	while (ptr != NULL) {
 		prev = ptr->prev;
+		frame_list_free(&ptr->frame_list);
 		free(ptr);
 		ptr = prev;
 	}
@@ -200,4 +213,37 @@ void session_table_free(struct session_table *table)
 		session_pool_free(table->udp);
 		table->udp = NULL;
 	}
+}
+
+static int pool_dump(FILE *file, const int depth, struct session_pool *pool)
+{
+	int ret = 0;
+
+	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
+		for (struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
+			ret += fprintf(file, "%*sSession %#x:%d <-> %#x:%d\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
+			for (struct frame_node *frame_node = entry->frame_list.first ; frame_node != NULL ; frame_node = frame_node->next)
+				ret += frame_print(file, depth + 1, &frame_node->frame);
+		}
+	}
+
+	return ret;
+
+}
+
+int session_table_dump(FILE *file, const int depth, struct session_table *table)
+{
+	int ret = 0;
+
+	if (table->tcp != NULL) {
+		ret += fprintf(file, "%*sTCP\n", depth, "");
+		ret += pool_dump(file, depth + 1, table->tcp);
+	}
+
+	if (table->udp != NULL) {
+		ret += fprintf(file, "%*sUDP\n", depth, "");
+		ret += pool_dump(file, depth + 1, table->udp);
+	}
+
+	return ret;
 }

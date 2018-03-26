@@ -3,14 +3,9 @@
 # define __session_h_666__
 
 #include <stdint.h>
+#include "frame_list.h"
 
 #define SESSION_HASH_SIZE 1021
-
-struct session_frame_pool {
-	struct frame_list **table;
-	size_t size;
-	size_t used;
-};
 
 struct session_key {
 	uint32_t a1;
@@ -21,7 +16,7 @@ struct session_key {
 
 struct session_entry {
 	struct session_key key;
-	struct session_frame_pool frame_pool;
+	struct frame_list frame_list;
 	struct session_entry *prev;
 };
 
@@ -39,6 +34,7 @@ struct session_table {
 int session_table_init(struct session_table *table);
 void session_table_free(struct session_table *table);
 
-int session_process_frame(struct session_table *table, struct frame *frame);
+int session_process_frame(struct session_table *table, struct frame_list *fame_list, struct frame_node *frame_node);
+int session_table_dump(FILE *file, const int depth, struct session_table *table);
 
 #endif

@@ -26,4 +26,10 @@ void frame_table_free(struct frame_table *table);
 struct frame_node *frame_node_new(struct frame_table *table, const struct timeval *ts);
 void frame_node_recycle(struct frame_table *table, struct frame_node *node);
 
+int frame_list_init(struct frame_list *list);
+void frame_list_free(struct frame_list *list);
+
+void frame_list_unlink(struct frame_list *list, struct frame_node *node);
+void frame_list_link_ordered(struct frame_list *list, struct frame_node *node);
+
 #endif
