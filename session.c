@@ -133,23 +133,48 @@ err:
 	return NULL;
 }
 
-static int process_udp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
+static struct session_entry *session_entry_get(struct session_table *table, const uint32_t saddr, const uint32_t daddr, const uint16_t source, const uint16_t dest)
 {
-	struct frame *frame = &frame_node->frame;
-	struct session_entry *entry;
+	struct session_entry *entry = NULL;
 	struct session_key key;
 	size_t hash;
-	int ret = -1;
 
-	get_key(&key, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.udp.hdr.source, frame->proto.udp.hdr.dest);
+	get_key(&key, saddr, daddr, source, dest);
 	hash = get_hash(&key);
 
-	entry = session_table_lookup(table->udp, hash, &key);
-	if (entry == NULL) {
-		entry = session_table_extend(&table->udp, hash, &key);
-		if (entry == NULL)
-			goto err;
-	}
+	entry = session_table_lookup(table->tcp, hash, &key);
+	if (entry == NULL)
+		entry = session_table_extend(&table->tcp, hash, &key);
+
+	return entry;
+}
+
+static int process_tcp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
+{
+	const struct frame *frame = &frame_node->frame;
+	struct session_entry *entry;
+	int ret = -1;
+
+	entry = session_entry_get(table, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.tcp.hdr.source, frame->proto.tcp.hdr.dest);
+	if (entry == NULL)
+		goto err;
+
+	frame_list_unlink(frame_list, frame_node);
+	frame_list_link_ordered(&entry->frame_list, frame_node);
+	ret = 1;
+err:
+	return ret;
+}
+
+static int process_udp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
+{
+	const struct frame *frame = &frame_node->frame;
+	struct session_entry *entry;
+	int ret = -1;
+
+	entry = session_entry_get(table, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.udp.hdr.source, frame->proto.udp.hdr.dest);
+	if (entry == NULL)
+		goto err;
 
 	frame_list_unlink(frame_list, frame_node);
 	frame_list_link_ordered(&entry->frame_list, frame_node);
@@ -173,6 +198,11 @@ int session_process_frame(struct session_table *table, struct frame_list *frame_
 	case frame_proto_type_udp:
 		ret = process_udp(table, frame_list, frame_node);
 		break;
+
+	case frame_proto_type_tcp:
+		ret = process_tcp(table, frame_list, frame_node);
+		break;
+
 	}
 
 drop_frame:
