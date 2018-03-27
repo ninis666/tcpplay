@@ -7,6 +7,8 @@
 #include "frame.h"
 #include "session.h"
 
+#define error_stream stderr
+
 int session_table_init(struct session_table *table)
 {
 	memset(table, 0, sizeof table[0]);
@@ -65,6 +67,55 @@ static inline uint32_t MurmurHash_32(const void *key, uint32_t len, const uint32
 	return h;
 }
 
+static struct session_tcp_info *session_tcp_info_alloc(void)
+{
+	struct session_tcp_info *info;
+
+	info = calloc(1, sizeof info[0]);
+	if (info == NULL) {
+		fprintf(error_stream, "!!! Failed to create tcp_info : %s\n", strerror(errno));
+		goto err;
+	}
+
+	return info;
+
+err:
+	return NULL;
+}
+
+static void session_tcp_info_free(struct session_tcp_info *info)
+{
+	free(info);
+}
+
+static struct session_entry *session_entry_alloc(const struct session_key *key)
+{
+	struct session_entry *entry;
+
+	entry = calloc(1, sizeof entry[0]);
+	if (entry == NULL) {
+		fprintf(error_stream, "!!! Failed to create pool entry : %s\n", strerror(errno));
+		goto err;
+	}
+	if (frame_list_init(&entry->frame_list) < 0)
+		goto free_entry_err;
+	entry->key = *key;
+	return entry;
+
+free_entry_err:
+	free(entry);
+err:
+	return NULL;
+}
+
+static void session_entry_free(struct session_entry *entry)
+{
+	if (entry->tcp_info != NULL)
+		session_tcp_info_free(entry->tcp_info);
+	frame_list_free(&entry->frame_list);
+	free(entry);
+}
+
 static inline void get_key(struct session_key *key, const uint32_t a1, const uint32_t a2, const uint16_t p1, const uint16_t p2)
 {
 	key->a1 = a1 < a2 ? a1 : a2;
@@ -103,21 +154,16 @@ static struct session_entry *session_table_extend(struct session_pool **pool_ptr
 	if (pool == NULL) {
 		pool = calloc(1, sizeof pool[0]);
 		if (pool == NULL) {
-			fprintf(stderr, "Failed to create pool : %s\n", strerror(errno));
+			fprintf(error_stream, "!!! Failed to create pool : %s\n", strerror(errno));
 			goto err;
 		}
 		*pool_ptr = pool;
 		new_pool = pool;
 	}
 
-	entry = calloc(1, sizeof entry[0]);
-	if (entry == NULL) {
-		fprintf(stderr, "Failed to create pool entry : %s\n", strerror(errno));
+	entry = session_entry_alloc(key);
+	if (entry == NULL)
 		goto err;
-	}
-	if (frame_list_init(&entry->frame_list) < 0)
-		goto free_entry_err;
-	entry->key = *key;
 
 	entry->prev = pool->session_hash_table[hash].last;
 	pool->session_hash_table[hash].last = entry;
@@ -125,8 +171,6 @@ static struct session_entry *session_table_extend(struct session_pool **pool_ptr
 		*pool_ptr = new_pool;
 	return entry;
 
-free_entry_err:
-	free(entry);
 err:
 	if (new_pool != NULL)
 		free(new_pool);
@@ -149,21 +193,130 @@ static struct session_entry *session_entry_get(struct session_table *table, cons
 	return entry;
 }
 
+#define TH_CONNECTED (TH_SYN | TH_ACK)
+
 static int process_tcp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
 {
 	const struct frame *frame = &frame_node->frame;
+	const struct tcphdr *hdr = &frame->proto.tcp.hdr;
+	const uint32_t seq = htonl(hdr->seq);
+	const uint32_t ack = htonl(hdr->ack_seq);
 	struct session_entry *entry;
-	int ret = -1;
+	struct session_tcp_info *info;
+	struct session_tcp_side *from;
+	struct session_tcp_side *to;
+
+	if (hdr->source == 0 || hdr->dest == 0) {
+		fprintf(stderr, "Invalid TCP source / dest = %u / %u\n", hdr->source, hdr->dest);
+		goto frame_err;
+	}
 
 	entry = session_entry_get(table, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.tcp.hdr.source, frame->proto.tcp.hdr.dest);
 	if (entry == NULL)
-		goto err;
+		goto fatal_err;
 
+	from = NULL;
+	to = NULL;
+
+	info = entry->tcp_info;
+	if (info == NULL) {
+		info = session_tcp_info_alloc();
+		if (info == NULL)
+			goto fatal_err;
+		entry->tcp_info = info;
+
+		to = &info->side1;
+		from = &info->side2;
+
+		to->port = hdr->source;
+		from->port = hdr->dest;
+
+	} else {
+
+		if (hdr->source == info->side1.port && hdr->dest == info->side2.port) {
+			to = &info->side1;
+			from = &info->side2;
+		}
+
+		if (hdr->source == info->side2.port && hdr->dest == info->side1.port) {
+			to = &info->side2;
+			from = &info->side1;
+		}
+	}
+
+	if (to == NULL || from == NULL) {
+		fprintf(stderr, "Unexpected TCP source / dest (Got <%u / %u>, <%u / %u> expected\n", hdr->source, hdr->dest, info->side1.port, info->side2.port);
+		goto frame_err;
+	}
+
+	if ((hdr->th_flags & TH_FIN) != 0) {
+		info->status |= TCP_CNX_CLOSED;
+		info->status &= ~TCP_CNX_OPEN_DONE;
+	}
+
+	if ((info->status & TCP_CNX_CLOSED) != 0)
+		goto drop_frame;
+
+	if ((info->status & TCP_CNX_OPEN_DONE) != TCP_CNX_OPEN_DONE) {
+
+		switch (hdr->th_flags) {
+		default:
+			if (info->server == NULL || info->client == NULL) {
+				info->status |= TCP_CNX_OPEN_DONE;
+				goto save_frame;
+			}
+
+			fprintf(error_stream, "!!! Unexpected flags in CNX stage\n");
+			goto frame_err;
+
+		case TH_SYN:
+			info->client = from;
+			info->server = to;
+			info->status = TCP_CNX_SYN;
+			from->first_seq = seq;
+			to->seq = 0;
+			break;
+
+		case TH_SYN | TH_ACK:
+			if (ack != to->first_seq + 1) {
+				fprintf(error_stream, "!!! Invalid SYN ACK on cnx : Got <%u>, <%u> expected\n", ack, to->first_seq + 1);
+				goto frame_err;
+			}
+
+			info->status |= TCP_CNX_SYN_ACK;
+			info->server = from;
+			info->client = to;
+			from->first_seq = seq;
+			break;
+
+		case TH_ACK:
+			if (info->server == NULL || info->client == NULL) {
+				info->status |= TCP_CNX_OPEN_DONE;
+				goto save_frame;
+			}
+
+			if (ack != to->first_seq + 1) {
+				fprintf(error_stream, "!!! Invalid ACK on cnx : Got <%u>, <%u> expected\n", ack, to->first_seq + 1);
+				goto frame_err;
+			}
+			info->status |= TCP_CNX_OPEN_DONE;
+			break;
+		}
+
+		goto drop_frame;
+	}
+
+save_frame:
 	frame_list_unlink(frame_list, frame_node);
 	frame_list_link_ordered(&entry->frame_list, frame_node);
-	ret = 1;
-err:
-	return ret;
+	return 1;
+
+frame_err:
+	frame_print(error_stream, 0, frame, 0);
+drop_frame:
+	return 0;
+fatal_err:
+	return -1;
 }
 
 static int process_udp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
@@ -217,8 +370,7 @@ static void session_entry_list_free(struct session_entry *last)
 	ptr = last;
 	while (ptr != NULL) {
 		prev = ptr->prev;
-		frame_list_free(&ptr->frame_list);
-		free(ptr);
+		session_entry_free(ptr);
 		ptr = prev;
 	}
 }
@@ -257,7 +409,6 @@ static int pool_dump(FILE *file, const int depth, const struct session_pool *poo
 	}
 
 	return done;
-
 }
 
 int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full)

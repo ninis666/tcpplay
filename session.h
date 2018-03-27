@@ -2,10 +2,11 @@
 #ifndef __session_h_666__
 # define __session_h_666__
 
-#include <stdint.h>
-#include "frame_list.h"
+# include <stdint.h>
+# include <netinet/tcp.h>
+# include "frame_list.h"
 
-#define SESSION_HASH_SIZE 1021
+# define SESSION_HASH_SIZE 1021
 
 struct session_key {
 	uint32_t a1;
@@ -14,7 +15,33 @@ struct session_key {
 	uint16_t p2;
 };
 
+#define session_tcp_cnx_done (1 << 0)
+
+#define TCP_CNX_SYN     (1 << 0)
+#define TCP_CNX_SYN_ACK (1 << 1)
+#define TCP_CNX_ACK     (1 << 2)
+#define TCP_CNX_FIN     (1 << 3)
+
+#define TCP_CNX_OPEN_DONE (TCP_CNX_SYN | TCP_CNX_SYN_ACK | TCP_CNX_ACK)
+#define TCP_CNX_CLOSED (TCP_CNX_FIN)
+
+
+struct session_tcp_side {
+	uint32_t first_seq;
+	uint16_t port;
+	uint32_t seq;
+};
+
+struct session_tcp_info {
+	uint8_t status;
+	struct session_tcp_side side1;
+	struct session_tcp_side side2;
+	struct session_tcp_side *server;
+	struct session_tcp_side *client;
+};
+
 struct session_entry {
+	struct session_tcp_info *tcp_info;
 	struct session_key key;
 	struct frame_list frame_list;
 	struct session_entry *prev;
