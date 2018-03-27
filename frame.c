@@ -85,50 +85,48 @@ static int print_proto_udp(FILE *file, const int depth, const struct frame_proto
 	return done;
 }
 
-static int print_proto_tcp(FILE *file, const int depth, const struct frame_proto_tcp *tcp)
+static int print_proto_tcp(FILE *file, const int depth, const struct frame_proto_tcp *tcp, const int full)
 {
 	int done = 0;
 	const struct tcphdr *hdr = &tcp->hdr;
 
-	done += fprintf(file, "%*sTCP %d -> %d\n", depth, "", htons(hdr->source), htons(hdr->dest));
-	done += fprintf(file, "%*sseq = %d\n", depth + 1, "", htons(hdr->seq));
-	done += fprintf(file, "%*sack_seq = %d\n", depth + 1, "", htons(hdr->ack_seq));
-	done += fprintf(file, "%*shdr_len = %d (%db)\n", depth + 1, "", hdr->doff, hdr->doff * 4);
-	done += fprintf(file, "%*sflags = [ %s%s%s%s%s%s]\n", depth + 1, "", hdr->urg ? "URG " : "", hdr->syn ? "SYN " : "", hdr->ack ? "ACK " : "", hdr->psh ? "PSH " : "", hdr->rst ? "RST " : "", hdr->fin ? "FIN " : "");
-	done += fprintf(file, "%*swindow = %d\n", depth + 1, "", hdr->window);
+	done += fprintf(file, "%*sTCP %d -> %d ", depth, "", htons(hdr->source), htons(hdr->dest));
+	done += fprintf(file, "flags = [ %s%s%s%s%s%s], [seq = %u, sack_seq = %u]\n", hdr->urg ? "URG " : "", hdr->syn ? "SYN " : "", hdr->fin ? "FIN " : "", hdr->ack ? "ACK " : "", hdr->psh ? "PSH " : "", hdr->rst ? "RST " : "", htonl(hdr->seq), htonl(hdr->ack_seq));
 
-	for (uint16_t idx = 0 ; idx < tcp->opt_size ; ) {
-		uint8_t opt_val_len;
+	if (full) {
+		for (uint16_t idx = 0 ; idx < tcp->opt_size ; ) {
+			uint8_t opt_val_len;
 
-		switch (tcp->opt[idx]) {
-		case 0:
-			/* End */
-			idx = tcp->opt_size;
-			break;
+			switch (tcp->opt[idx]) {
+			case 0:
+				/* End */
+				idx = tcp->opt_size;
+				break;
 
-		case 1:
-			/* NOP */
-			idx ++;
-			break;
+			case 1:
+				/* NOP */
+				idx ++;
+				break;
 
-		default:
-			opt_val_len = tcp->opt[idx + 1];
-			if (opt_val_len == 0) {
-				fprintf(stderr, "Invalid TCP option len");
+			default:
+				opt_val_len = tcp->opt[idx + 1];
+				if (opt_val_len == 0) {
+					fprintf(stderr, "Invalid TCP option len");
+					break;
+				}
+
+				done += fprintf(file, "%*sOPCODE  = %#02x (%db)\n", depth + 1, "", tcp->opt[idx], opt_val_len);
+				rawprint(stdout, depth + 2, tcp->opt + idx, opt_val_len, 4, 1);
+				idx += opt_val_len;
 				break;
 			}
-
-			done += fprintf(file, "%*sOPCODE  = %#02x (%db)\n", depth + 1, "", tcp->opt[idx], opt_val_len);
-			rawprint(stdout, depth + 2, tcp->opt + idx, opt_val_len, 4, 1);
-			idx += opt_val_len;
-			break;
 		}
 	}
 
 	return done;
 }
 
-int frame_print_proto(FILE *file, const int depth, const struct frame_proto *proto)
+int frame_print_proto(FILE *file, const int depth, const struct frame_proto *proto, const int full)
 {
 	switch (proto->type) {
 	default:
@@ -138,18 +136,18 @@ int frame_print_proto(FILE *file, const int depth, const struct frame_proto *pro
 		return print_proto_udp(file, depth, &proto->udp);
 
 	case frame_proto_type_tcp:
-		return print_proto_tcp(file, depth, &proto->tcp);
+		return print_proto_tcp(file, depth, &proto->tcp, full);
 	}
 }
 
-int frame_print(FILE *file, const int depth, const struct frame *frame)
+int frame_print(FILE *file, const int depth, const struct frame *frame, const int full)
 {
 	int done = 0;
 
 	done += fprintf(file, "%*s[%lds, %ldus]\n", depth, "", frame->ts.tv_sec, frame->ts.tv_usec);
 	done += frame_print_hw(file, depth + 1, &frame->hw);
 	done += frame_print_net(file, depth + 2, &frame->net);
-	done += frame_print_proto(file, depth + 3, &frame->proto);
+	done += frame_print_proto(file, depth + 3, &frame->proto, full);
 	done += frame_print_app(file, depth + 4, &frame->app);
 
 	return done;

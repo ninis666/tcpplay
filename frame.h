@@ -78,9 +78,9 @@ struct frame {
 
 int frame_print_hw(FILE *file, const int depth, const struct frame_hw *hw);
 int frame_print_net(FILE *file, const int depth, const struct frame_net *net);
-int frame_print_proto(FILE *file, const int depth, const struct frame_proto *proto);
+int frame_print_proto(FILE *file, const int depth, const struct frame_proto *proto, const int full);
 int frame_print_app(FILE *file, const int depth, const struct frame_app *app);
-int frame_print(FILE *file, const int depth, const struct frame *frame);
+int frame_print(FILE *file, const int depth, const struct frame *frame, const int full);
 
 int frame_init(struct frame *frame, const struct timeval *ts);
 void frame_deinit(struct frame *frame);

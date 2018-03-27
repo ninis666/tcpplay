@@ -253,7 +253,7 @@ static int pool_dump(FILE *file, const int depth, struct session_pool *pool)
 		for (struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
 			ret += fprintf(file, "%*sSession %#x:%d <-> %#x:%d\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
 			for (struct frame_node *frame_node = entry->frame_list.first ; frame_node != NULL ; frame_node = frame_node->next)
-				ret += frame_print(file, depth + 1, &frame_node->frame);
+				ret += frame_print(file, depth + 1, &frame_node->frame, 0);
 		}
 	}
 
