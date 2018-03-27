@@ -79,12 +79,12 @@ void frame_list_unlink(struct frame_list *list, struct frame_node *node)
 	list->count --;
 }
 
-void frame_list_link_ordered(struct frame_list *list, struct frame_node *node)
+void frame_list_link_ordered_ext(struct frame_list *list, struct frame_node *node, frame_node_cmp_fun_t cmp_fun)
 {
 	struct frame_node *node_after;
 
 	for (node_after = list->last ; node_after != NULL ; node_after = node_after->prev) {
-		if (timercmp(&node->frame.ts, &node_after->frame.ts, >))
+		if (cmp_fun(node, node_after) >= 0)
 			break;
 	}
 
@@ -92,6 +92,22 @@ void frame_list_link_ordered(struct frame_list *list, struct frame_node *node)
 		list_link_after(list, node_after, node);
 	else
 		list_link_first(list, node);
+}
+
+static int frame_node_cmp_ts(const struct frame_node *node1, const struct frame_node *node2)
+{
+	if (timercmp(&node1->frame.ts, &node2->frame.ts, <))
+		return -1;
+
+	if (timercmp(&node1->frame.ts, &node2->frame.ts, >))
+		return 1;
+
+	return 0;
+}
+
+void frame_list_link_ordered(struct frame_list *list, struct frame_node *node)
+{
+	frame_list_link_ordered_ext(list, node, frame_node_cmp_ts);
 }
 
 void frame_list_free(struct frame_list *list)
@@ -185,4 +201,14 @@ struct frame_node *frame_node_new(struct frame_table *table, const struct timeva
 err:
 	return NULL;
 
+}
+
+int frame_list_dump(FILE *file, const int depth, const struct frame_list *list, const int full)
+{
+	int done = 0;
+
+	for (const struct frame_node *node = list->first ; node != NULL ; node = node->next)
+		done += frame_print(file, depth + 1, &node->frame, full);
+
+	return done;
 }

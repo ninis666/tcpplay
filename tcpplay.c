@@ -81,7 +81,7 @@ int main(int ac, char **av)
 		}
 	}
 
-	session_table_dump(stdout, 0, &session_table);
+	session_table_dump(stdout, 0, &session_table, 0);
 
 	ret = 0;
 

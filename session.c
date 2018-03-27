@@ -245,35 +245,34 @@ void session_table_free(struct session_table *table)
 	}
 }
 
-static int pool_dump(FILE *file, const int depth, struct session_pool *pool)
+static int pool_dump(FILE *file, const int depth, const struct session_pool *pool, const int full)
 {
-	int ret = 0;
+	int done = 0;
 
 	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
 		for (struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
-			ret += fprintf(file, "%*sSession %#x:%d <-> %#x:%d\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
-			for (struct frame_node *frame_node = entry->frame_list.first ; frame_node != NULL ; frame_node = frame_node->next)
-				ret += frame_print(file, depth + 1, &frame_node->frame, 0);
+			done += fprintf(file, "%*sSession %#x:%d <-> %#x:%d\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
+			done += frame_list_dump(file, depth + 1, &entry->frame_list, full);
 		}
 	}
 
-	return ret;
+	return done;
 
 }
 
-int session_table_dump(FILE *file, const int depth, struct session_table *table)
+int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full)
 {
-	int ret = 0;
+	int done = 0;
 
 	if (table->tcp != NULL) {
-		ret += fprintf(file, "%*sTCP\n", depth, "");
-		ret += pool_dump(file, depth + 1, table->tcp);
+		done += fprintf(file, "%*sTCP\n", depth, "");
+		done += pool_dump(file, depth + 1, table->tcp, full);
 	}
 
 	if (table->udp != NULL) {
-		ret += fprintf(file, "%*sUDP\n", depth, "");
-		ret += pool_dump(file, depth + 1, table->udp);
+		done += fprintf(file, "%*sUDP\n", depth, "");
+		done += pool_dump(file, depth + 1, table->udp, full);
 	}
 
-	return ret;
+	return done;
 }

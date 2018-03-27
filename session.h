@@ -35,6 +35,6 @@ int session_table_init(struct session_table *table);
 void session_table_free(struct session_table *table);
 
 int session_process_frame(struct session_table *table, struct frame_list *fame_list, struct frame_node *frame_node);
-int session_table_dump(FILE *file, const int depth, struct session_table *table);
+int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full);
 
 #endif
