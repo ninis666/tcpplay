@@ -14,9 +14,11 @@
 
 #define DEFAULT_PORT 6666
 #define DEFAULT_MAX_BACKLOG 5
-#define DEFAULT_MUST_ECHO 0
+#define DEFAULT_MUST_ECHO 1
+#define DEFAULT_MAX_RECEIVE_SIZE (4 * 1024)
 
 int must_echo = DEFAULT_MUST_ECHO;
+size_t max_receive_size = DEFAULT_MAX_RECEIVE_SIZE;
 
 static void *worker(void *arg)
 {
@@ -25,6 +27,7 @@ static void *worker(void *arg)
 	const struct sockaddr_in *sin = (const struct sockaddr_in *)&from;
 	socklen_t from_len = sizeof from;
 	void *ret = NULL;
+	char *receive_buffer;
 
 	if (getpeername(fd, (struct sockaddr *)&from, &from_len) < 0) {
 		fprintf(stderr, "Failed to get peername : %s\n", strerror(errno));
@@ -36,16 +39,21 @@ static void *worker(void *arg)
 		goto close_err;
 	}
 
+	receive_buffer = malloc(max_receive_size);
+	if (receive_buffer == NULL) {
+		fprintf(stderr, "Failed to allocate receive buffer : %s\n", strerror(errno));
+		goto close_err;
+	}
+
 	fprintf(stderr, "Managing %s:%d\n", inet_ntoa(sin->sin_addr), htons(sin->sin_port));
 
 	for (;;) {
-		char input[1024 * 2];
 		ssize_t input_size;
 
-		input_size = read(fd, input, sizeof input);
+		input_size = read(fd, receive_buffer, max_receive_size);
 		if (input_size < 0) {
 			fprintf(stderr, "Failed to read from %s:%d : %s\n", inet_ntoa(sin->sin_addr), htons(sin->sin_port), strerror(errno));
-			goto close_err;
+			goto free_err;
 		}
 
 		if (input_size == 0)
@@ -54,21 +62,24 @@ static void *worker(void *arg)
 		if (must_echo) {
 			ssize_t output_size;
 
-			output_size = write(fd, input, input_size);
+			output_size = write(fd, receive_buffer, input_size);
 			if (output_size < 0) {
 				fprintf(stderr, "Failed to write to %s:%d : %s\n", inet_ntoa(sin->sin_addr), htons(sin->sin_port), strerror(errno));
-				goto close_err;
+				goto free_err;
 			}
 
 			if (output_size != input_size) {
 				fprintf(stderr, "Failed to write to %s:%d %ldb (%ldb done)\n", inet_ntoa(sin->sin_addr), htons(sin->sin_port), input_size, output_size);
-				goto close_err;
+				goto free_err;
 			}
 		}
 	}
 
 	fprintf(stderr, "Finihed to manage %s:%d\n", inet_ntoa(sin->sin_addr), htons(sin->sin_port));
 	ret = arg;
+
+free_err:
+	free(receive_buffer);
 close_err:
 	close(fd);
 err:
@@ -83,28 +94,64 @@ int main(int ac, char **av)
 
 	memset(&local, 0, sizeof local);
 	local.sin_family = AF_INET;
+	local.sin_port = htons(DEFAULT_PORT);
 
-	if (ac >= 2) {
+	for (i = 1 ; i < ac ; i++) {
 
-		if (inet_aton(av[1], &local.sin_addr) == 0) {
-			fprintf(stderr, "Invalid address : %s\n", av[1]);
-			goto err;
+		if (strcmp(av[i], "-port") == 0) {
+			char *ptr;
+			long l;
+
+			if (i + 1 >= ac)
+				goto no_arg;
+
+			l = strtol(av[i + 1], &ptr, 0);
+			if (errno == EINVAL || errno == ERANGE || l >= UINT16_MAX || l <= 0 || *ptr != 0)
+				goto inv_arg;
+			local.sin_port = htons(l);
+			i++;
+			continue;
 		}
+
+		if (strcmp(av[i], "-local") == 0) {
+			if (i + 1 >= ac)
+				goto no_arg;
+
+			if (inet_aton(av[i + 1], &local.sin_addr) == 0)
+				goto inv_arg;
+			i++;
+			continue;
+		}
+
+		if (strcmp(av[i], "-size") == 0) {
+			char *ptr;
+
+			if (i + 1 >= ac)
+				goto no_arg;
+
+			max_receive_size = strtoull(av[i + 1], &ptr, 0);
+			if (errno == EINVAL || errno == ERANGE || *ptr != 0)
+				goto inv_arg;
+			i++;
+			continue;
+		}
+
+		if (strcmp(av[i], "-noecho") == 0) {
+			must_echo = 0;
+			continue;
+		}
+
+		fprintf(stderr, "Unknown option <%s>\n", av[i]);
+		goto usage;
+	no_arg:
+		fprintf(stderr, "No argument for <%s> option\n", av[i]);
+		goto usage;
+	inv_arg:
+		fprintf(stderr, "Invalid argument for <%s> option : %s\n", av[i], av[i + 1]);
+	usage:
+		fprintf(stderr, "Usage : %s [-local <bind_address>] [-port <bind_port>] [-size <max_data_size>] [-noecho]\n", av[0]);
+		goto err;
 	}
-
-	if (ac >= 3) {
-		char *ptr;
-		long l;
-
-		l = strtol(av[2], &ptr, 0);
-		if (errno == EINVAL || errno == ERANGE || l >= UINT16_MAX || l <= 0 || *ptr != 0) {
-			fprintf(stderr, "Invalid port : %s\n", av[2]);
-			goto err;
-		}
-
-		local.sin_port = htons(l);
-	} else
-		local.sin_port = htons(DEFAULT_PORT);
 
 	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (sock < 0) {
@@ -128,7 +175,7 @@ int main(int ac, char **av)
 		goto close_err;
 	}
 
-	fprintf(stderr, "Accepting from %s:%d\n", inet_ntoa(local.sin_addr), htons(local.sin_port));
+	fprintf(stderr, "Accepting from %s:%d, max_receive_size = %zd, echo = %d\n", inet_ntoa(local.sin_addr), htons(local.sin_port), max_receive_size, must_echo);
 
 	for (;;) {
 		int fd;

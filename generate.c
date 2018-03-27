@@ -57,43 +57,38 @@ void convert_block(int fd, const void *buffer, const size_t count)
 	}
 
 	write_block(fd, "\n", 1);
-
 }
 
 int main(int ac, char **av)
 {
-	uint16_t n;
-	uint16_t nloop;
-	uint16_t loop;
+	size_t n;
+	size_t nloop;
+	size_t loop;
 	int fd_in;
 	int ret = 1;
 	uint8_t *input;
 
 	if (ac >= 2) {
-		unsigned long long l;
 		char *ptr;
 
-		l = strtoull(av[1], &ptr, 0);
-		if (l >= UINT16_MAX || *ptr != 0 || errno == EINVAL || errno == ERANGE) {
+		n = strtoull(av[1], &ptr, 0) / 2;
+		if (errno == EINVAL || errno == ERANGE) {
 			fprintf(stderr, "Invalid lenght : %s", av[1]);
 			goto err;
 		}
 
-		n = (uint16_t )(l / 2);
 	} else
 		n = (1024 * 2) / 2;
 
 	if (ac >= 3) {
-		unsigned long long l;
 		char *ptr;
 
-		l = strtoull(av[1], &ptr, 0);
-		if (l >= UINT16_MAX || *ptr != 0 || errno == EINVAL || errno == ERANGE) {
-			fprintf(stderr, "Invalid lenght : %s", av[1]);
+		nloop = strtoull(av[2], &ptr, 0);
+		if (errno == EINVAL || errno == ERANGE) {
+			fprintf(stderr, "Invalid lenght : %s", av[2]);
 			goto err;
 		}
 
-		nloop = (uint16_t )l;
 	} else
 		nloop = 1;
 
@@ -105,7 +100,7 @@ int main(int ac, char **av)
 
 	input = malloc(n);
 	if (input == NULL) {
-		fprintf(stderr, "Failed to malloc %db : %s\n", n, strerror(errno));
+		fprintf(stderr, "Failed to malloc %zdb : %s\n", n, strerror(errno));
 		goto close_err;
 	}
 
