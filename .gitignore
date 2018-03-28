@@ -2,6 +2,7 @@
 *.o
 .*.depend
 *.pcap
+*.pcapng
 core.*
 core
 vgcore.*

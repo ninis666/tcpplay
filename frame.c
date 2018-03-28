@@ -168,3 +168,28 @@ void frame_deinit(struct frame *frame)
 	free(frame->app.data);
 	frame_init(frame, NULL);
 }
+
+size_t frame_steal_app(struct frame *frame, uint8_t **data_ptr)
+{
+	size_t ret;
+
+	if (frame->app.size > 0 && frame->app.data != NULL) {
+		*data_ptr = frame->app.data;
+		ret = frame->app.size;
+		frame->app.data = NULL;
+		frame->app.size = 0;
+	} else {
+		*data_ptr = NULL;
+		ret = 0;
+	}
+
+	return ret;
+}
+
+void frame_update_app(struct frame *frame, uint8_t *data, size_t size)
+{
+	if (frame->app.data != NULL)
+		free(frame->app.data);
+	frame->app.data = data;
+	frame->app.size = size;
+}

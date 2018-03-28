@@ -84,5 +84,7 @@ int frame_print(FILE *file, const int depth, const struct frame *frame, const in
 
 int frame_init(struct frame *frame, const struct timeval *ts);
 void frame_deinit(struct frame *frame);
+size_t frame_steal_app(struct frame *frame, uint8_t **data_ptr);
+void frame_update_app(struct frame *frame, uint8_t *data, size_t size);
 
 #endif

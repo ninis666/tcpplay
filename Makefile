@@ -16,7 +16,8 @@ tcpplay: tcpplay.o \
 	rawprint.o \
 	frame.o \
 	frame_list.o \
-	session.o
+	session.o \
+	streambuffer.o
 	$(CC) $(LDFLAGS) $^ -lpcap -o $@
 
 tcp_server: tcp_server.o

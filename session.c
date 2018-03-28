@@ -77,14 +77,26 @@ static struct session_tcp_info *session_tcp_info_alloc(void)
 		goto err;
 	}
 
+	if (streambuffer_init(&info->side1.tx_buffer) < 0)
+		goto free_err;
+
+	if (streambuffer_init(&info->side2.tx_buffer) < 0)
+		goto free_stream1_err;
+
 	return info;
 
+free_stream1_err:
+	streambuffer_free(&info->side1.tx_buffer);
+free_err:
+	free(info);
 err:
 	return NULL;
 }
 
 static void session_tcp_info_free(struct session_tcp_info *info)
 {
+	streambuffer_free(&info->side2.tx_buffer);
+	streambuffer_free(&info->side1.tx_buffer);
 	free(info);
 }
 
@@ -177,41 +189,50 @@ err:
 	return NULL;
 }
 
-static struct session_entry *session_entry_get(struct session_table *table, const uint32_t saddr, const uint32_t daddr, const uint16_t source, const uint16_t dest)
+static struct session_entry *session_entry_get(struct session_pool **pool_ptr, const uint32_t saddr, const uint32_t daddr, const uint16_t source, const uint16_t dest)
 {
 	struct session_entry *entry = NULL;
 	struct session_key key;
+	struct session_pool *pool = *pool_ptr;
 	size_t hash;
 
 	get_key(&key, saddr, daddr, source, dest);
 	hash = get_hash(&key);
 
-	entry = session_table_lookup(table->tcp, hash, &key);
+	if (pool == NULL)
+		entry = NULL;
+	else
+		entry = session_table_lookup(pool, hash, &key);
+
 	if (entry == NULL)
-		entry = session_table_extend(&table->tcp, hash, &key);
+		entry = session_table_extend(pool_ptr, hash, &key);
 
 	return entry;
 }
 
 #define TH_CONNECTED (TH_SYN | TH_ACK)
 
-static int process_tcp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
+static int process_tcp(struct session_pool **pool_ptr, struct frame_node *frame_node)
 {
-	const struct frame *frame = &frame_node->frame;
-	const struct tcphdr *hdr = &frame->proto.tcp.hdr;
-	const uint32_t seq = htonl(hdr->seq);
-	const uint32_t ack = htonl(hdr->ack_seq);
+	struct frame *frame = &frame_node->frame;
+	const struct frame_net_ip *ip = &frame->net.ip;
+	const struct tcphdr *tcp = &frame->proto.tcp.hdr;
+	const uint32_t seq = htonl(tcp->seq);
+	const uint32_t ack = htonl(tcp->ack_seq);
 	struct session_entry *entry;
 	struct session_tcp_info *info;
 	struct session_tcp_side *from;
 	struct session_tcp_side *to;
+	size_t len;
+	uint8_t *data;
+	size_t offset;
 
-	if (hdr->source == 0 || hdr->dest == 0) {
-		fprintf(stderr, "Invalid TCP source / dest = %u / %u\n", hdr->source, hdr->dest);
+	if (tcp->source == 0 || tcp->dest == 0) {
+		fprintf(stderr, "Invalid TCP source / dest = %u / %u\n", tcp->source, tcp->dest);
 		goto frame_err;
 	}
 
-	entry = session_entry_get(table, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.tcp.hdr.source, frame->proto.tcp.hdr.dest);
+	entry = session_entry_get(pool_ptr, ip->source.s_addr, ip->dest.s_addr, tcp->source, tcp->dest);
 	if (entry == NULL)
 		goto fatal_err;
 
@@ -228,28 +249,30 @@ static int process_tcp(struct session_table *table, struct frame_list *frame_lis
 		to = &info->side1;
 		from = &info->side2;
 
-		to->port = hdr->source;
-		from->port = hdr->dest;
+		to->addr = ip->source;
+		to->port = tcp->source;
+		from->addr = ip->dest;
+		from->port = tcp->dest;
 
 	} else {
 
-		if (hdr->source == info->side1.port && hdr->dest == info->side2.port) {
+		if (ip->source.s_addr == info->side1.addr.s_addr && ip->dest.s_addr == info->side2.addr.s_addr && tcp->source == info->side1.port && tcp->dest == info->side2.port) {
 			to = &info->side1;
 			from = &info->side2;
 		}
 
-		if (hdr->source == info->side2.port && hdr->dest == info->side1.port) {
+		if (ip->source.s_addr == info->side2.addr.s_addr && ip->dest.s_addr == info->side1.addr.s_addr && tcp->source == info->side2.port && tcp->dest == info->side1.port) {
 			to = &info->side2;
 			from = &info->side1;
 		}
 	}
 
 	if (to == NULL || from == NULL) {
-		fprintf(stderr, "Unexpected TCP source / dest (Got <%u / %u>, <%u / %u> expected\n", hdr->source, hdr->dest, info->side1.port, info->side2.port);
+		fprintf(stderr, "Unexpected source / dest (Got <%u / %u>, <%u / %u> expected\n", tcp->source, tcp->dest, info->side1.port, info->side2.port);
 		goto frame_err;
 	}
 
-	if ((hdr->th_flags & TH_FIN) != 0) {
+	if ((tcp->th_flags & TH_FIN) != 0) {
 		info->status |= TCP_CNX_CLOSED;
 		info->status &= ~TCP_CNX_OPEN_DONE;
 	}
@@ -259,19 +282,21 @@ static int process_tcp(struct session_table *table, struct frame_list *frame_lis
 
 	if ((info->status & TCP_CNX_OPEN_DONE) != TCP_CNX_OPEN_DONE) {
 
-		switch (hdr->th_flags) {
+		switch (tcp->th_flags) {
 		default:
-			if (info->server == NULL || info->client == NULL) {
+			if (info->client == NULL || info->server == NULL) {
 				info->status |= TCP_CNX_OPEN_DONE;
-				goto save_frame;
+				from->first_seq = seq - 1;
+				to->first_seq = ack - 1;
+				goto keep_frame;
 			}
 
 			fprintf(error_stream, "!!! Unexpected flags in CNX stage\n");
 			goto frame_err;
 
 		case TH_SYN:
-			info->client = from;
-			info->server = to;
+			info->client = to;
+			info->server = from;
 			info->status = TCP_CNX_SYN;
 			from->first_seq = seq;
 			to->seq = 0;
@@ -284,15 +309,17 @@ static int process_tcp(struct session_table *table, struct frame_list *frame_lis
 			}
 
 			info->status |= TCP_CNX_SYN_ACK;
-			info->server = from;
-			info->client = to;
+			info->client = from;
+			info->server = to;
 			from->first_seq = seq;
 			break;
 
 		case TH_ACK:
-			if (info->server == NULL || info->client == NULL) {
+			if (info->client == NULL || info->server == NULL) {
 				info->status |= TCP_CNX_OPEN_DONE;
-				goto save_frame;
+				from->first_seq = seq - 1;
+				to->first_seq = ack - 1;
+				goto keep_frame;
 			}
 
 			if (ack != to->first_seq + 1) {
@@ -306,10 +333,25 @@ static int process_tcp(struct session_table *table, struct frame_list *frame_lis
 		goto drop_frame;
 	}
 
-save_frame:
-	frame_list_unlink(frame_list, frame_node);
-	frame_list_link_ordered(&entry->frame_list, frame_node);
-	return 1;
+keep_frame:
+
+	offset = seq - from->first_seq - 1;
+
+	len = frame_steal_app(frame, &data);
+	if (len > 0) {
+		int res;
+
+		res = streambuffer_add(&to->tx_buffer, data, offset, len);
+		if (res <= 0)
+			frame_update_app(frame, data, len);
+
+		if (res < 0) {
+			fprintf(stderr, "!!! TCP data have not been saved (offset = %zd)\n", offset);
+			goto frame_err;
+		}
+
+	}
+	return 0;
 
 frame_err:
 	frame_print(error_stream, 0, frame, 0);
@@ -319,13 +361,13 @@ fatal_err:
 	return -1;
 }
 
-static int process_udp(struct session_table *table, struct frame_list *frame_list, struct frame_node *frame_node)
+static int process_udp(struct session_pool **pool_ptr, struct frame_list *frame_list, struct frame_node *frame_node)
 {
 	const struct frame *frame = &frame_node->frame;
 	struct session_entry *entry;
 	int ret = -1;
 
-	entry = session_entry_get(table, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.udp.hdr.source, frame->proto.udp.hdr.dest);
+	entry = session_entry_get(pool_ptr, frame->net.ip.source.s_addr, frame->net.ip.dest.s_addr, frame->proto.udp.hdr.source, frame->proto.udp.hdr.dest);
 	if (entry == NULL)
 		goto err;
 
@@ -349,11 +391,11 @@ int session_process_frame(struct session_table *table, struct frame_list *frame_
 		goto drop_frame;
 
 	case frame_proto_type_udp:
-		ret = process_udp(table, frame_list, frame_node);
+		ret = process_udp(&table->udp, frame_list, frame_node);
 		break;
 
 	case frame_proto_type_tcp:
-		ret = process_tcp(table, frame_list, frame_node);
+		ret = process_tcp(&table->tcp, frame_node);
 		break;
 
 	}
@@ -397,7 +439,7 @@ void session_table_free(struct session_table *table)
 	}
 }
 
-static int pool_dump(FILE *file, const int depth, const struct session_pool *pool, const int full)
+static int generic_pool_dump(FILE *file, const int depth, const struct session_pool *pool, const int full)
 {
 	int done = 0;
 
@@ -411,18 +453,75 @@ static int pool_dump(FILE *file, const int depth, const struct session_pool *poo
 	return done;
 }
 
+
+static int tcp_side_dump(FILE *file, const int depth, const char *name, const struct session_tcp_side *side)
+{
+	int done = 0;
+
+	done += fprintf(file, "%*s%s : %s:%d\n", depth, "", name, inet_ntoa(side->addr), htons(side->port));
+	done += streambuffer_dump(file, depth + 1, &side->tx_buffer);
+
+	return done;
+}
+
+static int tcp_info_dump(FILE *file, const int depth, const struct session_tcp_info *info)
+{
+	int done = 0;
+	const struct session_tcp_side *side1;
+	const char *side1_name;
+	const struct session_tcp_side *side2;
+	const char *side2_name;
+
+	if (info->client != NULL || info->server != NULL) {
+		if (info->client == NULL || info->server == NULL)
+			abort();
+		side1 = info->client;
+		side1_name = "client";
+		side2 = info->server;
+		side2_name = "server";
+	} else {
+		side1 = &info->side1;
+		side1_name = "side1";
+		side2 = &info->side2;
+		side2_name = "side2";
+	}
+
+ 	done += tcp_side_dump(file, depth, side1_name, side1);
+ 	done += tcp_side_dump(file, depth, side2_name, side2);
+	return done;
+}
+
+static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool *pool)
+{
+	int done = 0;
+
+	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
+		for (const struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
+			const struct session_tcp_info *info = entry->tcp_info;
+
+			if (info == NULL)
+				abort();
+
+			done += fprintf(file, "%*sSession %#x-%#x-%#x-%#x\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
+			done += tcp_info_dump(file, depth + 1, info);
+		}
+	}
+
+	return done;
+}
+
 int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full)
 {
 	int done = 0;
 
 	if (table->tcp != NULL) {
 		done += fprintf(file, "%*sTCP\n", depth, "");
-		done += pool_dump(file, depth + 1, table->tcp, full);
+		done += tcp_pool_dump(file, depth + 1, table->tcp);
 	}
 
 	if (table->udp != NULL) {
 		done += fprintf(file, "%*sUDP\n", depth, "");
-		done += pool_dump(file, depth + 1, table->udp, full);
+		done += generic_pool_dump(file, depth + 1, table->udp, full);
 	}
 
 	return done;

@@ -16,7 +16,7 @@ int main(int ac, char **av)
 	decode_fun_t decode;
 	struct frame_table frame_table;
 	struct session_table session_table;
-	int ret;
+	int ret = 1;
 
 	if (ac >= 2) {
 		from = av[1];
