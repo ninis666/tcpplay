@@ -26,12 +26,29 @@ struct session_key {
 	uint16_t p2;
 };
 
+struct session_tx {
+	struct timeval ts;
+	const struct streambuffer_node *buffer;
+};
+
+struct session_tx_node {
+	struct session_tx tx;
+	struct session_tx_node *next;
+	struct session_tx_node *prev;
+};
+
+struct session_tx_list {
+	struct session_tx_node *first;
+	struct session_tx_node *last;
+};
+
 struct session_tcp_side {
 	uint32_t first_seq;
 	struct in_addr addr;
 	uint16_t port;
 	uint32_t seq;
 	struct streambuffer tx_buffer;
+	struct session_tx_list tx_list;
 };
 
 struct session_tcp_info {

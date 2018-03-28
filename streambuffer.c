@@ -68,7 +68,7 @@ static void node_link_first(struct streambuffer *list, struct streambuffer_node 
 	list->size += node->to - node->from + 1;
 }
 
-int streambuffer_add(struct streambuffer *list, uint8_t *data, const size_t offset, const size_t size)
+int streambuffer_add(struct streambuffer *list, uint8_t *data, const size_t offset, const size_t size, struct streambuffer_node **res_ptr)
 {
 	struct streambuffer_node *node;
 	struct streambuffer_node *prev;
@@ -134,21 +134,31 @@ int streambuffer_add(struct streambuffer *list, uint8_t *data, const size_t offs
 	goto err;
 
 saved:
+	if (res_ptr != NULL)
+		*res_ptr = node;
 	return 1;
 already_saved:
+	if (res_ptr != NULL)
+		*res_ptr = prev;
 	return 0;
 err:
 	return -1;
+}
+
+int streambuffer_node_dump(FILE *file, const int depth, const struct streambuffer_node *node)
+{
+	int done = 0;
+	done += fprintf(file, "%*s[%zd - %zd]\n", depth, "", node->from, node->to);
+	done += rawprint(file, depth, node->data.stream, node->to - node->from + 1, 8, 4);
+	return done;
 }
 
 int streambuffer_dump(FILE *file, const int depth, const struct streambuffer *list)
 {
 	int done = 0;
 
-	for (const struct streambuffer_node *node = list->first ; node != NULL ; node = node->next) {
-		done += fprintf(file, "%*s[%zd - %zd]\n", depth, "", node->from, node->to);
-		done += rawprint(file, depth + 1, node->data.stream, node->to - node->from + 1, 8, 4);
-	}
+	for (const struct streambuffer_node *node = list->first ; node != NULL ; node = node->next)
+		done += streambuffer_node_dump(file, depth, node);
 
 	return done;
 }

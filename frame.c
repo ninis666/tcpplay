@@ -156,8 +156,12 @@ int frame_print(FILE *file, const int depth, const struct frame *frame, const in
 int frame_init(struct frame *frame, const struct timeval *ts)
 {
 	memset(frame, 0, sizeof frame[0]);
-	if (ts != NULL)
+	if (ts != NULL) {
+
+		memset(&frame->ts, 0, sizeof frame->ts);
+		timeradd(&frame->ts, ts, &frame->ts); /* Normalize timestamps */
 		frame->ts = *ts;
+	}
 	return 0;
 }
 

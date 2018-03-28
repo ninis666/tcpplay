@@ -26,7 +26,8 @@ struct streambuffer {
 
 int streambuffer_init(struct streambuffer *st);
 void streambuffer_free(struct streambuffer *list);
-int streambuffer_add(struct streambuffer *list, uint8_t *data, const size_t offset, const size_t size);
+int streambuffer_add(struct streambuffer *list, uint8_t *data, const size_t offset, const size_t size, struct streambuffer_node **res_ptr);
 int streambuffer_dump(FILE *file, const int depth, const struct streambuffer *list);
+int streambuffer_node_dump(FILE *file, const int depth, const struct streambuffer_node *node);
 
 #endif

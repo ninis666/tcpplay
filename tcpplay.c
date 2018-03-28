@@ -81,8 +81,8 @@ int main(int ac, char **av)
 		}
 	}
 
-	session_table_dump(stdout, 0, &session_table, 0);
-
+	printf("Session found :\n");
+	session_table_dump(stdout, 0, &session_table, 1);
 	ret = 0;
 
 free_session_table_err:

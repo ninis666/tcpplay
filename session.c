@@ -67,6 +67,74 @@ static inline uint32_t MurmurHash_32(const void *key, uint32_t len, const uint32
 	return h;
 }
 
+static int tx_list_node_add(struct session_tx_list *list, const struct timeval *ts, const struct streambuffer_node *buffer)
+{
+	struct session_tx_node *after;
+	struct session_tx_node *node;
+
+	for (after = list->last ; after != NULL ; after = after->prev) {
+		if (timercmp(ts, &after->tx.ts, >))
+			break;
+		if (!timercmp(ts, &after->tx.ts, <))
+			break;
+	}
+
+	node = calloc(1, sizeof node[0]);
+	if (node == NULL) {
+		fprintf(stderr, "Failed to allocate tx_node : %s\n", strerror(errno));
+		goto err;
+	}
+	node->tx.ts = *ts;
+	node->tx.buffer = buffer;
+
+	if (after != NULL) {
+
+		node->prev = after;
+		node->next = after->next;
+
+		if (after->next != NULL)
+			after->next->prev = node;
+		else
+			list->last = node;
+		after->next = node;
+
+	} else {
+
+		node->prev = NULL;
+		node->next = list->first;
+
+		if (list->first != NULL)
+			list->first->prev = node;
+		else
+			list->last = node;
+		list->first = node;
+	}
+
+	return 0;
+
+err:
+	return -1;
+
+}
+
+static int tx_list_init(struct session_tx_list *list)
+{
+	memset(list, 0, sizeof list[0]);
+	return 0;
+}
+
+static void tx_list_free(struct session_tx_list *list)
+{
+	struct session_tx_node *node;
+
+	node = list->first;
+	while (node != NULL) {
+		struct session_tx_node *next = node->next;
+		free(node);
+		node = next;
+	}
+}
+
 static struct session_tcp_info *session_tcp_info_alloc(void)
 {
 	struct session_tcp_info *info;
@@ -83,8 +151,18 @@ static struct session_tcp_info *session_tcp_info_alloc(void)
 	if (streambuffer_init(&info->side2.tx_buffer) < 0)
 		goto free_stream1_err;
 
+	if (tx_list_init(&info->side1.tx_list) < 0)
+		goto free_stream2_err;
+
+	if (tx_list_init(&info->side2.tx_list) < 0)
+		goto free_tx1_err;
+
 	return info;
 
+free_tx1_err:
+	tx_list_free(&info->side1.tx_list);
+free_stream2_err:
+	streambuffer_free(&info->side2.tx_buffer);
 free_stream1_err:
 	streambuffer_free(&info->side1.tx_buffer);
 free_err:
@@ -97,6 +175,8 @@ static void session_tcp_info_free(struct session_tcp_info *info)
 {
 	streambuffer_free(&info->side2.tx_buffer);
 	streambuffer_free(&info->side1.tx_buffer);
+	tx_list_free(&info->side1.tx_list);
+	tx_list_free(&info->side2.tx_list);
 	free(info);
 }
 
@@ -340,10 +420,13 @@ keep_frame:
 	len = frame_steal_app(frame, &data);
 	if (len > 0) {
 		int res;
+		struct streambuffer_node *buffer = NULL;
 
-		res = streambuffer_add(&to->tx_buffer, data, offset, len);
+		res = streambuffer_add(&to->tx_buffer, data, offset, len, &buffer);
 		if (res <= 0)
 			frame_update_app(frame, data, len);
+		else
+			tx_list_node_add(&to->tx_list, &frame->ts, buffer);
 
 		if (res < 0) {
 			fprintf(stderr, "!!! TCP data have not been saved (offset = %zd)\n", offset);
@@ -454,23 +537,35 @@ static int generic_pool_dump(FILE *file, const int depth, const struct session_p
 }
 
 
-static int tcp_side_dump(FILE *file, const int depth, const char *name, const struct session_tcp_side *side)
+static int tcp_side_dump(FILE *file, const int depth, const char *name, const struct session_tcp_side *side, const struct timeval *t0, const int full)
 {
 	int done = 0;
 
 	done += fprintf(file, "%*s%s : %s:%d\n", depth, "", name, inet_ntoa(side->addr), htons(side->port));
-	done += streambuffer_dump(file, depth + 1, &side->tx_buffer);
+
+	if (full > 0) {
+
+		for (struct session_tx_node *node = side->tx_list.first ; node != NULL ; node = node->next) {
+			struct timeval dt;
+
+			timersub(&node->tx.ts, t0, &dt);
+
+			done += fprintf(file, "%*s[%ld, %ld]\n", depth, "", dt.tv_sec, dt.tv_usec);
+			done += streambuffer_node_dump(file, depth + 1, node->tx.buffer);
+		}
+	}
 
 	return done;
 }
 
-static int tcp_info_dump(FILE *file, const int depth, const struct session_tcp_info *info)
+static int tcp_info_dump(FILE *file, const int depth, const struct session_tcp_info *info, const int full)
 {
 	int done = 0;
 	const struct session_tcp_side *side1;
 	const char *side1_name;
 	const struct session_tcp_side *side2;
 	const char *side2_name;
+	struct timeval t1, t2, *t0;
 
 	if (info->client != NULL || info->server != NULL) {
 		if (info->client == NULL || info->server == NULL)
@@ -486,12 +581,26 @@ static int tcp_info_dump(FILE *file, const int depth, const struct session_tcp_i
 		side2_name = "side2";
 	}
 
- 	done += tcp_side_dump(file, depth, side1_name, side1);
- 	done += tcp_side_dump(file, depth, side2_name, side2);
+
+	if (side1->tx_list.first != NULL)
+		t1 = side1->tx_list.first->tx.ts;
+	else
+		memset(&t1, 0, sizeof t1);
+	if (side2->tx_list.first != NULL)
+		t2 = side2->tx_list.first->tx.ts;
+	else
+		memset(&t2, 0, sizeof t2);
+	if (timercmp(&t1, &t2, <))
+		t0 = &t1;
+	else
+		t0 = &t2;
+
+ 	done += tcp_side_dump(file, depth, side1_name, side1, t0, full);
+ 	done += tcp_side_dump(file, depth, side2_name, side2, t0, full);
 	return done;
 }
 
-static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool *pool)
+static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool *pool, const int full)
 {
 	int done = 0;
 
@@ -503,7 +612,7 @@ static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool 
 				abort();
 
 			done += fprintf(file, "%*sSession %#x-%#x-%#x-%#x\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
-			done += tcp_info_dump(file, depth + 1, info);
+			done += tcp_info_dump(file, depth + 1, info, full);
 		}
 	}
 
@@ -516,7 +625,7 @@ int session_table_dump(FILE *file, const int depth, const struct session_table *
 
 	if (table->tcp != NULL) {
 		done += fprintf(file, "%*sTCP\n", depth, "");
-		done += tcp_pool_dump(file, depth + 1, table->tcp);
+		done += tcp_pool_dump(file, depth + 1, table->tcp, full);
 	}
 
 	if (table->udp != NULL) {
