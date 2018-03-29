@@ -528,8 +528,9 @@ static int generic_pool_dump(FILE *file, const int depth, const struct session_p
 
 	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
 		for (struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
-			done += fprintf(file, "%*sSession %#x:%d <-> %#x:%d\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
-			done += frame_list_dump(file, depth + 1, &entry->frame_list, full);
+			done += fprintf(file, "%*sSession %#x-%#x-%#x-%#x\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
+			if (full > 0)
+				done += frame_list_dump(file, depth + 1, &entry->frame_list, full);
 		}
 	}
 
