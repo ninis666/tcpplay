@@ -82,6 +82,7 @@ int session_table_init(struct session_table *table);
 void session_table_free(struct session_table *table);
 
 int session_process_frame(struct session_table *table, struct frame_list *fame_list, struct frame_node *frame_node);
-int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full);
+int session_table_dump(FILE *file, const int depth, const struct session_table *table, const char *type, const struct in_addr addr, const uint16_t port, const int full);
+const struct session_tcp_info *session_table_get_tcp(const struct session_table *table, const struct in_addr host, const uint16_t port, const struct session_tcp_side **asked_ptr, const struct session_tcp_side **other_ptr);
 
 #endif

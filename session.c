@@ -601,38 +601,96 @@ static int tcp_info_dump(FILE *file, const int depth, const struct session_tcp_i
 	return done;
 }
 
-static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool *pool, const int full)
+static int tcp_pool_dump(FILE *file, const int depth, const struct session_pool *pool, const struct in_addr host, const uint16_t port, const int full)
 {
 	int done = 0;
+	const uint16_t port_net_order = htons(port);
 
 	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
 		for (const struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
 			const struct session_tcp_info *info = entry->tcp_info;
+			int found = 0;
 
 			if (info == NULL)
 				abort();
 
+			if (port_net_order != 0 && host.s_addr != INADDR_ANY) {
+				if (port_net_order == info->side1.port && host.s_addr == info->side1.addr.s_addr)
+					found = 1;
+				else if (port_net_order == info->side2.port && host.s_addr == info->side2.addr.s_addr)
+					found = 1;
+				if (found == 0)
+					continue;
+			}
+
 			done += fprintf(file, "%*sSession %#x-%#x-%#x-%#x\n", depth, "", entry->key.a1, entry->key.p1, entry->key.a2, entry->key.p2);
 			done += tcp_info_dump(file, depth + 1, info, full);
+
+			if (found)
+				break;
 		}
 	}
 
 	return done;
 }
 
-int session_table_dump(FILE *file, const int depth, const struct session_table *table, const int full)
+int session_table_dump(FILE *file, const int depth, const struct session_table *table, const char *type, const struct in_addr addr, const uint16_t port, const int full)
 {
 	int done = 0;
 
-	if (table->tcp != NULL) {
+	if (type != NULL && strcasecmp(type, "any") == 0)
+		type = NULL;
+
+	if ((type == NULL || strcasecmp(type, "tcp") == 0) && table->tcp != NULL) {
 		done += fprintf(file, "%*sTCP\n", depth, "");
-		done += tcp_pool_dump(file, depth + 1, table->tcp, full);
+		done += tcp_pool_dump(file, depth + 1, table->tcp, addr, port, full);
 	}
 
-	if (table->udp != NULL) {
+	if ((type == NULL || strcasecmp(type, "udp") == 0) && table->udp != NULL) {
 		done += fprintf(file, "%*sUDP\n", depth, "");
 		done += generic_pool_dump(file, depth + 1, table->udp, full);
 	}
 
 	return done;
+}
+
+const struct session_tcp_info *session_table_get_tcp(const struct session_table *table, const struct in_addr host, const uint16_t port, const struct session_tcp_side **asked_ptr, const struct session_tcp_side **other_ptr)
+{
+	const struct session_tcp_info *info = NULL;
+	const struct session_pool *pool = table->tcp;
+	const uint16_t port_net_order = htons(port);
+
+	if (pool == NULL)
+		goto end;
+
+	for (size_t idx = 0 ; idx < sizeof pool->session_hash_table / sizeof pool->session_hash_table[0] ; idx ++) {
+		for (const struct session_entry *entry = pool->session_hash_table[idx].last ; entry != NULL ; entry = entry->prev) {
+			const struct session_tcp_info *cur = entry->tcp_info;
+
+			if (cur == NULL)
+				abort();
+
+			if (port_net_order == cur->side1.port && host.s_addr == cur->side1.addr.s_addr) {
+				info = cur;
+				if (asked_ptr != NULL)
+					*asked_ptr = &cur->side1;
+				if (other_ptr != NULL)
+					*other_ptr = &cur->side2;
+				goto end;
+
+			}
+
+			if (port_net_order == cur->side2.port && host.s_addr == cur->side2.addr.s_addr) {
+				info = cur;
+				if (asked_ptr != NULL)
+					*asked_ptr = &cur->side2;
+				if (other_ptr != NULL)
+					*other_ptr = &cur->side1;
+				goto end;
+			}
+		}
+	}
+
+end:
+	return info;
 }

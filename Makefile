@@ -17,7 +17,8 @@ tcpplay: tcpplay.o \
 	frame.o \
 	frame_list.o \
 	session.o \
-	streambuffer.o
+	streambuffer.o \
+	replayer.o
 	$(CC) $(LDFLAGS) $^ -lpcap -o $@
 
 tcp_server: tcp_server.o
