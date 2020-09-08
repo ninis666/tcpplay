@@ -125,6 +125,7 @@ static int cmd_replay_tcp_session(struct session_table *session_table, int ac, c
 	struct in_addr distant_addr;
 	uint16_t distant_port;
 	int server_mode;
+	int interactive_mode;
 	const struct session_tcp_info *info;
 	const struct session_tcp_side *local_side;
 	struct replayer replayer;
@@ -137,6 +138,7 @@ static int cmd_replay_tcp_session(struct session_table *session_table, int ac, c
 	distant_addr.s_addr = INADDR_ANY;
 	distant_port = 0;
 	server_mode = 0;
+	interactive_mode = 0;
 	for (int i = 1 ; i < ac ; i ++) {
 
 		if (strcmp(av[i], "-replay_host") == 0) {
@@ -159,6 +161,8 @@ static int cmd_replay_tcp_session(struct session_table *session_table, int ac, c
 			i++;
 		} else 	if (strcmp(av[i], "-server") == 0)
 			server_mode = 1;
+		else if (strcmp(av[i], "-interactive") == 0)
+			interactive_mode ++;
 		else {
 			fprintf(stderr, "Unknown option for <%s> command : <%s>\n", av[0], av[i]);
 			goto usage;
@@ -166,12 +170,12 @@ static int cmd_replay_tcp_session(struct session_table *session_table, int ac, c
 		continue;
 
 	inv_arg:
-		fprintf(stderr, "Invalid argument for <%s> option\n", av[0]);
+		fprintf(stderr, "Invalid argument for <%s> option\n", av[i]);
 		goto usage;
 	no_arg:
-		fprintf(stderr, "No argument for <%s> option\n", av[0]);
+		fprintf(stderr, "No argument for <%s> option\n", av[i]);
 	usage:
-		fprintf(stderr, "Usage : %s <-replay_host <addr:port>> [-server] [-local_host <addr:port>] [-distant_host <addr:port>]\n", av[0]);
+		fprintf(stderr, "Usage : %s <-replay_host <addr:port>> [-server] [-interactive] [-local_host <addr:port>] [-distant_host <addr:port>]\n", av[0]);
 		return 1;
 	}
 
@@ -201,11 +205,22 @@ static int cmd_replay_tcp_session(struct session_table *session_table, int ac, c
 
 	for (;;) {
 		int idle = 0;
-		struct timeval now;
+#define REPLAY_INTERACTIVE_PROMPT "Press [Enter]"
 
-		gettimeofday(&now, NULL);
+		if (interactive_mode) {
 
-		idle = replayer_loop(&replayer, &now);
+			if (replayer_connected(&replayer)) {
+				write(STDOUT_FILENO, REPLAY_INTERACTIVE_PROMPT, sizeof REPLAY_INTERACTIVE_PROMPT - 1);
+				if (getchar()  < 0)
+					break;
+			}
+			idle = replayer_loop(&replayer, NULL);
+		} else {
+			struct timeval now;
+			gettimeofday(&now, NULL);
+			idle = replayer_loop(&replayer, &now);
+		}
+
 		if (idle < 0)
 			goto replayer_deinit;
 

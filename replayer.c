@@ -161,7 +161,7 @@ static int replay_send(struct replayer *replayer, const struct timeval *now)
 
 	if (replayer->last_tx_ts.tv_sec == 0 && replayer->last_tx_ts.tv_usec == 0) {
 		replayer->next_tx = replayer->tx_list->first;
-		replayer->last_tx_ts = *now;
+		replayer->last_tx_ts = (now != NULL) ? *now : (struct timeval){ -1, -1 };
 	}
 
 	if (replayer->next_tx == NULL)
@@ -170,11 +170,13 @@ static int replay_send(struct replayer *replayer, const struct timeval *now)
 	if (replayer->tx_list->first == NULL)
 		abort();
 
-	timersub(&replayer->next_tx->tx.ts, &replayer->tx_list->first->tx.ts, &next_dt);
-	timersub(now, &replayer->last_tx_ts, &real_dt);
-
-	if (timercmp(&real_dt, &next_dt, <))
-		goto idle;
+	if (now != NULL) {
+		timersub(&replayer->next_tx->tx.ts, &replayer->tx_list->first->tx.ts, &next_dt);
+		timersub(now, &replayer->last_tx_ts, &real_dt);
+		if (timercmp(&real_dt, &next_dt, <))
+			goto idle;
+	} else
+		next_dt = (struct timeval){ 0, 0 };
 
 	data = replayer->next_tx->tx.buffer->data.stream;
 	size = replayer->next_tx->tx.buffer->to - replayer->next_tx->tx.buffer->from + 1;
@@ -187,7 +189,7 @@ static int replay_send(struct replayer *replayer, const struct timeval *now)
 		goto err;
 	}
 
-	replayer->last_tx_ts = *now;
+	replayer->last_tx_ts = (now != NULL) ? *now : (struct timeval){ -1, -1 };
 	replayer->next_tx = replayer->next_tx->next;
 	return 1;
 
@@ -199,14 +201,20 @@ err:
 	return -1;
 }
 
-static int replay_receive(struct replayer *replayer, const struct timeval *now)
+static int replay_receive(struct replayer *replayer, const struct timeval *now_ptr)
 {
 	ssize_t size;
+	struct timeval now;
 	struct timeval real_dt;
 
+	if (now_ptr == NULL) {
+		gettimeofday(&now, NULL);
+		now_ptr = &now;
+	}
+
 	if (replayer->first_rx_ts.tv_sec == 0 && replayer->first_rx_ts.tv_usec == 0)
-		replayer->first_rx_ts = *now;
-	timersub(now, &replayer->first_rx_ts, &real_dt);
+		replayer->first_rx_ts = *now_ptr;
+	timersub(now_ptr, &replayer->first_rx_ts, &real_dt);
 
 	for (;;) {
 		char data[1024];
@@ -239,6 +247,13 @@ err:
 	return -1;
 }
 
+int replayer_connected(struct replayer *replayer)
+{
+	if ((replayer->flags & REPLAYER_FLAGS_CONNECTED) == 0)
+		return 0;
+	return 1;
+}
+
 int replayer_loop(struct replayer *replayer, const struct timeval *now)
 {
 	int res;
@@ -250,6 +265,9 @@ int replayer_loop(struct replayer *replayer, const struct timeval *now)
 		if (res == 0)
 			goto idle;
 		replayer->flags |= REPLAYER_FLAGS_CONNECTED;
+
+		if (now == NULL) /* On interactive mode, dont send now ! */
+			goto idle;
 	}
 
 	res = replay_send(replayer, now);

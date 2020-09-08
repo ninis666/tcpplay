@@ -31,4 +31,6 @@ void replayer_deinit(struct replayer *replayer);
 
 int replayer_loop(struct replayer *replayer, const struct timeval *now);
 
+int replayer_connected(struct replayer *replayer);
+
 #endif
